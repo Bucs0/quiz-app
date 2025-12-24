@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { AlertCircle, CheckCircle, Clock, LogOut, Users } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, LogOut, Users, Mail } from 'lucide-react';
+import emailjs from '@emailjs/browser';
+
+// EmailJS Configuration
+// Replace these with your actual EmailJS credentials
+const EMAILJS_CONFIG = {
+  serviceId: 'service_s1w8grg',
+  templateId: 'template_ixir445',
+  publicKey: '5cdqswWLMp1UTmPU8'
+};
 
 // Mock quiz data
 const QUIZ_DATA = {
@@ -98,8 +107,8 @@ function App() {
     return 'login';
   });
 
-  const handleLogin = (name, role) => {
-    const user = { name, role };
+  const handleLogin = (name, email, role) => {
+    const user = { name, email, role };
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
     setView(role === 'instructor' ? 'instructor-dashboard' : 'student-dashboard');
@@ -139,11 +148,14 @@ function App() {
 
 function LoginPage({ onLogin }) {
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [role, setRole] = useState('student');
 
   const handleSubmit = () => {
-    if (name.trim()) {
-      onLogin(name.trim(), role);
+    if (name.trim() && email.trim() && email.includes('@')) {
+      onLogin(name.trim(), email.trim(), role);
+    } else {
+      alert('Please enter a valid name and email address');
     }
   };
 
@@ -173,6 +185,20 @@ function LoginPage({ onLogin }) {
               onKeyPress={handleKeyPress}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               placeholder="Enter your name"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Email Address
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyPress={handleKeyPress}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="Enter your email"
             />
           </div>
 
@@ -223,7 +249,7 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
 
   useEffect(() => {
     const results = JSON.parse(localStorage.getItem(STORAGE_KEYS.QUIZ_RESULTS) || '[]');
-    const userResult = results.find(r => r.studentName === user.name);
+    const userResult = results.find(r => r.studentEmail === user.email);
     
     if (userResult) {
       setHasCompletedQuiz(true);
@@ -232,7 +258,7 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
 
     const released = localStorage.getItem(STORAGE_KEYS.RELEASED_SCORES) === 'true';
     setScoresReleased(released);
-  }, [user.name]);
+  }, [user.email]);
 
   return (
     <div className="min-h-screen p-4">
@@ -241,7 +267,10 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold text-gray-800">Welcome, {user.name}!</h2>
-              <p className="text-gray-600">Student Dashboard</p>
+              <p className="text-gray-600 flex items-center gap-2">
+                <Mail size={16} />
+                {user.email}
+              </p>
             </div>
             <button
               onClick={onLogout}
@@ -269,6 +298,7 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
                   <li>Do not switch tabs or minimize the window</li>
                   <li>After 3 violations, the quiz will auto-submit</li>
                   <li>You can only take this quiz once</li>
+                  <li>Results will be sent to your email when released</li>
                 </ul>
               </div>
               
@@ -288,7 +318,7 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
                       <CheckCircle className="text-green-600" />
                       <p className="text-green-800 font-semibold">Quiz Completed</p>
                     </div>
-                    <p className="text-green-700">Your results have been released!</p>
+                    <p className="text-green-700">Your results have been released and sent to your email!</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -296,6 +326,9 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
                       <p className="text-sm text-indigo-600 font-medium">Score</p>
                       <p className="text-3xl font-bold text-indigo-700">
                         {result.score} / {QUIZ_DATA.questions.length}
+                      </p>
+                      <p className="text-sm text-indigo-600 mt-1">
+                        {Math.round((result.score / QUIZ_DATA.questions.length) * 100)}%
                       </p>
                     </div>
                     <div className="bg-orange-50 p-4 rounded-lg">
@@ -322,7 +355,7 @@ function StudentDashboard({ user, onLogout, onStartQuiz }) {
                     </p>
                   </div>
                   <p className="text-yellow-700 mt-2">
-                    Your answers have been submitted. Please wait for the instructor to release the results.
+                    Your answers have been submitted. Results will be sent to your email ({user.email}) when the instructor releases them.
                   </p>
                 </div>
               )}
@@ -361,6 +394,7 @@ function QuizPage({ user, onComplete }) {
 
     const result = {
       studentName: user.name,
+      studentEmail: user.email,
       score,
       totalQuestions: QUIZ_DATA.questions.length,
       violations,
@@ -373,36 +407,37 @@ function QuizPage({ user, onComplete }) {
     localStorage.setItem(STORAGE_KEYS.QUIZ_RESULTS, JSON.stringify(results));
 
     onComplete();
-  }, [isSubmitting, answers, violations, user.name, onComplete]);
+  }, [isSubmitting, answers, violations, user.name, user.email, onComplete]);
 
   useEffect(() => {
-  timerRef.current = setInterval(() => {
-    setTimeLeft((prev) => {
-      if (prev <= 1) {
-        handleSubmit(true);
-        return 0;
+    timerRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          handleSubmit(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setViolations((prev) => prev + 1);
+        setShowWarning(true);
+        setTimeout(() => setShowWarning(false), 3000);
       }
-      return prev - 1;
-    });
-  }, 1000);
+    };
 
-  const handleVisibilityChange = () => {
-    if (document.hidden) {
-      setViolations((prev) => prev + 1);
-      setShowWarning(true);
-      setTimeout(() => setShowWarning(false), 3000);
-    }
-  };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [handleSubmit]);
 
-  return () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-  };
-}, [handleSubmit]);
   useEffect(() => {
     if (violations >= 3 && !isSubmitting) {
       handleSubmit(true);
@@ -552,10 +587,72 @@ function InstructorDashboard({ user, onLogout }) {
     return localStorage.getItem(STORAGE_KEYS.RELEASED_SCORES) === 'true';
   });
 
-  const handleReleaseScores = () => {
+  const [isSendingEmails, setIsSendingEmails] = useState(false);
+
+  const sendScoreEmail = async (result) => {
+    try {
+      const templateParams = {
+        to_email: result.studentEmail,
+        to_name: result.studentName,
+        quiz_title: QUIZ_DATA.title,
+        score: result.score,
+        total_questions: result.totalQuestions,
+        percentage: Math.round((result.score / result.totalQuestions) * 100),
+        violations: result.violations,
+        submission_time: new Date(result.timestamp).toLocaleString(),
+        instructor_name: user.name,
+        instructor_email: user.email
+      };
+
+      await emailjs.send(
+        EMAILJS_CONFIG.serviceId,
+        EMAILJS_CONFIG.templateId,
+        templateParams,
+        EMAILJS_CONFIG.publicKey
+      );
+
+      return { success: true, email: result.studentEmail };
+    } catch (error) {
+      console.error('Error sending email to', result.studentEmail, error);
+      return { success: false, email: result.studentEmail, error };
+    }
+  };
+
+  const handleReleaseScores = async () => {
+    if (results.length === 0) {
+      alert('No submissions to release!');
+      return;
+    }
+
+    const confirm = window.confirm(
+      `Are you sure you want to release scores to ${results.length} student(s)? Emails will be sent to all students.`
+    );
+
+    if (!confirm) return;
+
+    setIsSendingEmails(true);
+
+    const emailResults = await Promise.all(
+      results.map(result => sendScoreEmail(result))
+    );
+
+    const successCount = emailResults.filter(r => r.success).length;
+    const failCount = emailResults.filter(r => !r.success).length;
+
     localStorage.setItem(STORAGE_KEYS.RELEASED_SCORES, 'true');
     setScoresReleased(true);
-    alert('Scores have been released to all students!');
+    setIsSendingEmails(false);
+
+    if (failCount === 0) {
+      alert(`✅ Success! Scores have been released and emails sent to all ${successCount} student(s)!`);
+    } else {
+      alert(
+        `⚠️ Scores released!\n` +
+        `✅ Successfully sent: ${successCount} emails\n` +
+        `❌ Failed: ${failCount} emails\n\n` +
+        `Please check the console for details.`
+      );
+    }
   };
 
   const handleResetQuiz = () => {
@@ -575,7 +672,10 @@ function InstructorDashboard({ user, onLogout }) {
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold text-gray-800">Instructor Dashboard</h2>
-              <p className="text-gray-600">Welcome, {user.name}</p>
+              <p className="text-gray-600 flex items-center gap-2">
+                <Mail size={16} />
+                {user.email}
+              </p>
             </div>
             <button
               onClick={onLogout}
@@ -600,9 +700,11 @@ function InstructorDashboard({ user, onLogout }) {
               {!scoresReleased && results.length > 0 && (
                 <button
                   onClick={handleReleaseScores}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
+                  disabled={isSendingEmails}
+                  className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
                 >
-                  Release Results
+                  <Mail size={18} />
+                  {isSendingEmails ? 'Sending Emails...' : 'Release & Email Results'}
                 </button>
               )}
               {scoresReleased && (
@@ -636,6 +738,9 @@ function InstructorDashboard({ user, onLogout }) {
                       Student Name
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Email
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Score
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -654,6 +759,9 @@ function InstructorDashboard({ user, onLogout }) {
                     <tr key={idx} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{result.studentName}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-600">{result.studentEmail}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
